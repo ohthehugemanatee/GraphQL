@@ -57,6 +57,15 @@ class Processor
     /** @var int */
     protected $maxComplexity;
 
+    /** @var array */
+    protected $delayedResolverCallbacks;
+
+    /** @var array */
+    protected $delayedResolverIds;
+
+    /** @var \Youshido\GraphQL\Execution\DelayedResolver[] */
+    protected $delayedResolvers;
+
     public function __construct(AbstractSchema $schema)
     {
         if (empty($this->executionContext)) {
@@ -275,7 +284,7 @@ class Processor
         return $requestValue;
     }
 
-    protected function resolveObject(FieldInterface $field, AstFieldInterface $ast, $parentValue, $fromUnion = false)
+  protected function resolveObject(FieldInterface $field, AstFieldInterface $ast, $parentValue, $fromUnion = false)
     {
         $resolvedValue = $parentValue;
         if (!$fromUnion) {
@@ -574,4 +583,49 @@ class Processor
         $this->maxComplexity = $maxComplexity;
     }
 
+  /**
+   * Parse a delayed resolver.
+   *
+   * Take a single delayed resolver, and:
+   * - add it to the callbackmap and idmap properties.
+   * - add it to the array of delayed resolver references.
+   * - return the delayedResolver's placeholder.
+   * @param DelayedResolver $delayedResolver
+   */
+    protected function parseDelayedResolver(DelayedResolver $delayedResolver)
+    {
+          // If we already have some ids with this callback, add this id to the stack.
+          $callback_index = array_search($delayedResolver::$resolveCallback, $this->delayedResolverCallbacks);
+        if ($callback_index) {
+            $this->delayedResolverIds[$callback_index][$delayedResolver->getPlaceholder()] = $delayedResolver->getId();
+        } else {
+            // Otherwise, add the callback and the ID to their respective stacks.
+            $this->delayedResolverCallbacks[] = $delayedResolver::$resolveCallback;
+            $this->delayedResolverIds[][$delayedResolver->getPlaceholder()] = $delayedResolver->getId();
+        }
+        $this->delayedResolvers[$delayedResolver->getPlaceholder()] = &$delayedResolver;
+
+        // Let's try this with a reference instead.
+        //return $delayedResolver->getPlaceholder();
+    }
+
+  /**
+   * Process delayed resolvers.
+   *
+   * - check that the callbacks are callable.
+   * - loop over the callbacks, and send them all their list of IDs.
+   * - replace placeholder values with real objects.
+   */
+    protected function processDelayedResolvers()
+    {
+        $loaded_objects = [];
+        foreach ($this->delayedResolverCallbacks as $index => $callback) {
+            if (is_callable($callback)) {
+                $loaded_objects += call_user_func_array($callback, $this->delayedResolverIds[$index]);
+            }
+        }
+        foreach ($this->delayedResolvers as $placeholder => $value) {
+            $this->delayedResolvers[$placeholder] = $loaded_objects[$placeholder];
+        }
+    }
 }
