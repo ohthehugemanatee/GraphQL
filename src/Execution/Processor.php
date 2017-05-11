@@ -58,13 +58,13 @@ class Processor
     protected $maxComplexity;
 
     /** @var array */
-    protected $delayedResolverCallbacks;
+    protected $deferredResolverCallbacks;
 
     /** @var array */
-    protected $delayedResolverIds;
+    protected $deferredResolverIds;
 
-    /** @var \Youshido\GraphQL\Execution\DelayedResolver[] */
-    protected $delayedResolvers;
+    /** @var \Youshido\GraphQL\Execution\DeferredResolver[] */
+    protected $deferredResolvers;
 
     public function __construct(AbstractSchema $schema)
     {
@@ -125,6 +125,9 @@ class Processor
 
     protected function resolveField(FieldInterface $field, AstFieldInterface $ast, $parentValue = null, $fromObject = false)
     {
+      if ($parentValue != NULL && isset($this->deferredResolvers[$parentValue])) {
+        return;
+      }
         try {
             /** @var AbstractObjectType $type */
             $type        = $field->getType();
@@ -156,7 +159,8 @@ class Processor
                         throw new ResolveException(sprintf('You have to specify fields for "%s"', $ast->getName()), $ast->getLocation());
                     }
 
-                    return $this->resolveObject($targetField, $ast, $parentValue);
+                    $resolved = $this->resolveObject($targetField, $ast, $parentValue);
+                    return $resolved;
 
                 case TypeMap::KIND_LIST:
                     return $this->resolveList($targetField, $ast, $parentValue);
@@ -296,6 +300,11 @@ class Processor
         if (null === $resolvedValue) {
             return null;
         }
+
+      if ($resolvedValue instanceof DeferredResolver) {
+        $resolvedValue = $this->parseDeferredResolver($resolvedValue);
+      }
+
         /** @var AbstractObjectType $type */
         $type = $field->getType()->getNullableType();
 
@@ -364,6 +373,12 @@ class Processor
                 default:
                     $result[$this->getAlias($astField)] = $this->resolveField($field, $astField, $resolvedValue, true);
             }
+        }
+
+        if (!empty($this->deferredResolvers)) {
+          $result = $this->processDeferredResolvers($result);
+
+          $result = array_merge($result, $this->collectResult($field, $type, $astField, $resolvedValue));
         }
 
         return $result;
@@ -503,6 +518,7 @@ class Processor
         $astFields = $ast instanceof AstQuery ? $ast->getFields() : [];
 
         return $field->resolve($parentValue, $arguments, $this->createResolveInfo($field, $astFields));
+
     }
 
     protected function parseArgumentsValues(FieldInterface $field, AstFieldInterface $ast)
@@ -584,48 +600,51 @@ class Processor
     }
 
   /**
-   * Parse a delayed resolver.
+   * Parse a deferred resolver.
    *
-   * Take a single delayed resolver, and:
+   * Take a single deferred resolver, and:
    * - add it to the callbackmap and idmap properties.
    * - add it to the array of delayed resolver references.
    * - return the delayedResolver's placeholder.
-   * @param DelayedResolver $delayedResolver
+   * @param DeferredResolver $delayedResolver
    */
-    protected function parseDelayedResolver(DelayedResolver $delayedResolver)
+    protected function parseDeferredResolver(DeferredResolver $deferredResolver)
     {
           // If we already have some ids with this callback, add this id to the stack.
-          $callback_index = array_search($delayedResolver::$resolveCallback, $this->delayedResolverCallbacks);
+          $callback_index = array_search($deferredResolver::$resolveCallback, $this->deferredResolverCallbacks);
         if ($callback_index) {
-            $this->delayedResolverIds[$callback_index][$delayedResolver->getPlaceholder()] = $delayedResolver->getId();
+            $this->deferredResolverIds[$callback_index][$deferredResolver->getPlaceholder()] = $deferredResolver->getId();
         } else {
             // Otherwise, add the callback and the ID to their respective stacks.
-            $this->delayedResolverCallbacks[] = $delayedResolver::$resolveCallback;
-            $this->delayedResolverIds[][$delayedResolver->getPlaceholder()] = $delayedResolver->getId();
+            $this->deferredResolverCallbacks[] = $deferredResolver::$resolveCallback;
+            $this->deferredResolverIds[][$deferredResolver->getPlaceholder()] = $deferredResolver->getId();
         }
-        $this->delayedResolvers[$delayedResolver->getPlaceholder()] = &$delayedResolver;
+        $this->deferredResolvers[$deferredResolver->getPlaceholder()] = &$deferredResolver;
 
         // Let's try this with a reference instead.
-        //return $delayedResolver->getPlaceholder();
+        return $deferredResolver->getPlaceholder();
     }
 
   /**
-   * Process delayed resolvers.
+   * Process deferred resolvers.
    *
    * - check that the callbacks are callable.
    * - loop over the callbacks, and send them all their list of IDs.
    * - replace placeholder values with real objects.
    */
-    protected function processDelayedResolvers()
+    protected function processDeferredResolvers(array $result)
     {
         $loaded_objects = [];
-        foreach ($this->delayedResolverCallbacks as $index => $callback) {
+        foreach ($this->deferredResolverCallbacks as $index => $callback) {
             if (is_callable($callback)) {
-                $loaded_objects += call_user_func_array($callback, $this->delayedResolverIds[$index]);
+                $loaded_objects += call_user_func_array($callback, $this->deferredResolverIds[$index]);
             }
         }
-        foreach ($this->delayedResolvers as $placeholder => $value) {
-            $this->delayedResolvers[$placeholder] = $loaded_objects[$placeholder];
+        foreach ($this->deferredResolvers as $placeholder => $value) {
+            $this->deferredResolvers[$placeholder] = $loaded_objects[$placeholder];
         }
+        // @todo: insert loaded objects results in the results array.
+
+        return $result;
     }
 }

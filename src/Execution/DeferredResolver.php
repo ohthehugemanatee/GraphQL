@@ -57,7 +57,7 @@ class DeferredResolver
     /**
      * @param array|string $resolveCallback
      */
-    public static function setResolveCallback($resolveCallback)
+    public function setResolveCallback($resolveCallback)
     {
         self::$resolveCallback = $resolveCallback;
     }
