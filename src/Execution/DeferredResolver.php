@@ -1,24 +1,24 @@
 <?php
 /**
- * Date: 03.11.16
+ * Date: 11.05.17
  *
- * @author Portey Vasil <portey@gmail.com>
+ * @author Campbell Vertesi <campbell@vertesi.com>
  */
 
 namespace Youshido\GraphQL\Execution;
 
 
 /**
- * Abstract class DelayedResolver
+ * Class DeferredResolver
  *
  * A field resolver may return an instance of this class instead of a value.
- * When there are no more fields to resolve, DelayedResolver instances resolve
+ * When there are no more fields to resolve, DeferredResolver instances resolve
  * into real objects in a single operation. The field resolver then resumes
  * looping over the new data.
  *
  * @package Youshido\GraphQL\Execution
  */
-abstract class DelayedResolver
+class DeferredResolver
 {
 
   /**
